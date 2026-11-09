@@ -1,11 +1,20 @@
 [project]
 name = "meta-optimize"
 version = "0.1.0"
-description = "A framework that can wrap around any first-order optimization algorithm, tuning step sizes on the fly!"
+description = "Research implementations of online step-size adaptation"
 authors = [{ name="Saber Salehkaleybar", email="s.salehkaleybar@liacs.leidenuniv.nl" }]
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["torch"]
+dependencies = ["torch>=2.0"]
+
+[project.optional-dependencies]
+demo = ["torchvision>=0.15"]
+jax = ["jax>=0.6.2", "optax>=0.2.5", "chex>=0.1.90"]
+jax-demo = ["jax>=0.6.2", "optax>=0.2.5", "chex>=0.1.90", "dm-haiku", "tensorflow"]
+experiments = ["torch>=2.3", "numpy>=1.23", "torchvision>=0.15", "tensorboard>=2.13", "sentencepiece>=0.1.99", "requests>=2.31", "tqdm>=4.64"]
+tracking = ["wandb>=0.15"]
+export = ["transformers", "safetensors"]
+test = ["pytest>=8.2", "torch>=2.3", "numpy>=1.23"]
 
 [build-system]
 requires = ["setuptools", "wheel"]
@@ -13,3 +22,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["meta_optimize"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "jax: optional real JAX/Optax tests (install the jax extra)",
+]

@@ -1,0 +1,8 @@
+# Training/data preparation; optional W&B/Hugging Face export are root extras.
+# Install a matching Torch/Torchvision build separately for your platform.
+numpy>=1.23
+torch>=2.3
+tensorboard>=2.13
+requests>=2.31
+sentencepiece>=0.1.99
+tqdm>=4.64

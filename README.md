@@ -1,10 +1,93 @@
 # MetaOptimize
 
-MetaOptimize is a framework that can wrap around any first-order optimization algorithm, tuning step sizes on the fly to minimize a specific form of regret that accounts for long-term effect of step sizes on training, through a discounted sum of future losses.
+Research code for online step-size adaptation. The public Python class is a
+specific AdamW-base/Lion-meta implementation, **not** a generic wrapper around
+any optimizer. The package, JAX implementation, and experimental HF optimizers
+preserve different historical update equations; see the versioned
+[optimizer specification](docs/optimizer-variants.md).
 
-# Citation
+## Install and runtime
 
-This repository contains an implementation of the MetaOptimize in the following paper:
+From the repository root:
+
+```sh
+python -m pip install .                 # PyTorch library only
+python -m pip install '.[demo]'         # optional MNIST/Torchvision demo
+python -m pip install '.[jax]'          # optional JAX/Optax optimizer
+python -m pip install '.[experiments,test]' # offline experiment tests
+```
+
+Choose matching Torch/Torchvision builds for your platform first. The checked
+CPU reference is Python 3.13.5, Torch 2.8.0+cpu, Torchvision 0.23.0+cpu,
+NumPy 2.5.4, JAX 0.6.2, Optax 0.2.5 and Chex 0.1.90. These are validation
+versions, not a recovered historical paper environment. Metadata permits Python
+3.9+ for the core; other versions/platforms and optional dependency combinations
+have not all been tested. JAX 0.6.2 requires Python 3.10+.
+[Environment setup](docs/validation.md) records the reference install.
+
+The manual core requires Torch >=2.0. Experiments and tests require Torch >=2.3
+for `torch.amp.GradScaler(device)`; the test extra requires pytest >=8.2 for
+`importorskip(..., exc_type=ModuleNotFoundError)`. These are API-based minimums,
+not claims that Torch 2.3 was executed; Torch 2.8 remains the tested reference.
+
+Optional extras: `jax-demo` adds Haiku/TensorFlow for the download-dependent
+JAX MNIST demo; `tracking` adds W&B; `export` adds Transformers/Safetensors
+for Hugging Face conversion. None is needed for the manual PyTorch core.
+The qualified JAX module import also loads the package's Torch export.
+
+## Manual PyTorch usage (no downloads)
+
+```python
+import torch
+from meta_optimize import MetaOptimize_AdamW_Lion_hg
+
+model = torch.nn.Linear(3, 1)
+optimizer = MetaOptimize_AdamW_Lion_hg(
+    model.parameters(), alpha0=1e-3, meta_stepsize=1e-3,
+    stepsize_blocks="scalar",
+)
+x, y = torch.ones(4, 3), torch.zeros(4, 1)
+optimizer.zero_grad()
+loss = torch.nn.functional.mse_loss(model(x), y)
+loss.backward()
+optimizer.step()
+```
+
+This is a manual research optimizer, not a `torch.optim.Optimizer` subclass.
+Do not assume native scheduler, Trainer, GradScaler, closure, or dynamic
+`add_param_group` interoperability. Dense real parameters/gradients are the
+supported path; sparse gradients are unsupported. Groups count parameter
+**tensors**, not scalar elements: `scalar`, `layerwise`, or an explicit positive
+size list. `zero_grad()` zeroes existing gradients rather than setting them to
+`None`; absent gradients and zero-valued gradients have different state timing.
+`state_dict()` / `load_state_dict()` preserve optimizer/meta state, not model,
+RNG or data position. A weight-only load is a warmstart, not optimizer-state resume.
+Experiment wrappers have a separate `step(model, loss=None)` protocol; do not
+substitute that interface for this class's `step()`.
+
+The optional MNIST example is `python -m meta_optimize.optimizer` and downloads
+data; it is not part of offline validation.
+
+## Experiments and tests
+
+Active extracted sources are under `codes/MetaOptimize/{cifar10,imagenet,tinystories}`;
+each entry point is **`train.py`**, run from its own experiment directory.
+See [experiment commands and reproducibility limits](docs/experiments.md),
+[provenance](docs/provenance.md), and [offline checks](docs/validation.md).
+For example, inspect a trainer without downloading a dataset:
+
+```sh
+(cd codes/MetaOptimize/cifar10 && python train.py --help)
+```
+
+The immutable original supervised snapshot is `codes/Supervised_tasks.zip`.
+Do not extract it over the patched active sources. The supplied
+`codes/Continual_CIFAR100_experiments.zip` contains only CRLF, not an archive:
+Continual-CIFAR100 code is missing external input and cannot be reproduced
+from this repository. Unit tests and synthetic runs do not reproduce paper
+curves or validate full external-dataset/LLM training.
+
+## Citation
 
 ```bibtex
 @article{sharifnassab2024metaoptimize,
@@ -15,134 +98,3 @@ This repository contains an implementation of the MetaOptimize in the following 
   year={2025}
 }
 ```
-
-# Install 
-
-pip install git+https://github.com/sabersalehk/MetaOptimize.git 
-
-## Example: Train an MLP on MNIST with MetaOptimize
-
-```python
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
-from meta_optimize.optimizer import MetaOptimize_AdamW_Lion_hg
-
-# Define MLP (Net_2layer_M1)
-class MLP(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc1 = nn.Linear(28 * 28, 50)
-        self.fc2 = nn.Linear(50, 10)
-
-    def forward(self, x):
-        x = x.view(-1, 28 * 28)
-        x = F.relu(self.fc1(x))
-        return self.fc2(x)
-
-# Load MNIST
-def get_dataloaders(batch_size=64):
-    transform = transforms.ToTensor()
-    train = datasets.MNIST('./data', train=True, download=True, transform=transform)
-    test = datasets.MNIST('./data', train=False, download=True, transform=transform)
-    return DataLoader(train, batch_size=batch_size, shuffle=True), DataLoader(test, batch_size=batch_size)
-
-# Setup
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-trainloader, testloader = get_dataloaders()
-model = MLP().to(device)
-criterion = nn.CrossEntropyLoss()
-
-optimizer = MetaOptimize_AdamW_Lion_hg(
-    model.parameters(),
-    meta_stepsize=1e-3,
-    alpha0=1e-4,
-    stepsize_blocks='scalar',
-    gamma=1.0,
-    b1=0.9,
-    b2=0.999,
-    meta_b1=0.99,
-    meta_c1=0.9,
-    weight_decay=0.1
-)
-
-# Training loop
-for epoch in range(5):
-    model.train()
-    total_loss, correct, total = 0.0, 0, 0
-
-    for inputs, labels in trainloader:
-        inputs, labels = inputs.to(device), labels.to(device)
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-
-        total_loss += loss.item() * inputs.size(0)
-        correct += outputs.argmax(1).eq(labels).sum().item()
-        total += labels.size(0)
-
-    acc = 100. * correct / total
-    print(f"Epoch {epoch+1}: Loss={total_loss / total:.4f}, Acc={acc:.2f}%")
-```
-
-
-
-# Codes for Experiments in the Paper
-
-The code for the experiments in the paper is available in the `code` folder.
-
-- Experiments on **supervised learning tasks** (CIFAR-10, ImageNet, and TinyStories) are provided in the `Supervised_task.zip` file.
-- Experiments on **continual learning** (CIFAR-100) are available in the `Continual_CIFAR100_experiments.zip` file.
-
-
-## About Experiments on Supervised Learning Tasks
-
-Three folders contain codes for the experiments on CIFAR10, ImageNet, and TinyStories datasets. The main file to run the code is main.py in each folder. As an example, to run a (base, meta) = (AdamW, Lion) combination, the following command can be used:
-
-python3 train.py --optimizer HF --alg-base AdamW --weight-decay-base .1 --normalizer-param-base .999 --momentum-param-base .9 --Lion-beta2-base -1 --alg-meta Lion --meta-stepsize 1e-3 --alpha0 1e-6 --stepsize-groups scalar --weight-decay-meta 0 --normalizer-param-meta -1 --momentum-param-meta .99 --Lion-beta2-meta .9 --seed 0 --gamma 1 --run-name 1 --save-directory outputs --max-time 00:05:00
-
-If you want to run the code with the default configuration, use the following command:
-
-python3 train.py
-
-
-The set of arguments are:
-* optimizer: currently HF or AdamW (only in ImageNet or TinyStories dataset)
-* alg-base: base update (the options are: Adam, Lion, RMSProp, SGDm (SGD with momentum))
-* alg-meta: meta update (the options are: Adam, Lion)
-* weight-decay-base: $\kappa$
-* normalizer-param-base: $\lambda$
-* momentum-param-base: $\rho$
-* Lion-beta2-base : $c$
-* weight-decay-meta: $\bar{\kappa}$
-* normalizer-param-meta: $\bar{\lambda}$
-* momentum-param-meta: $\bar{\rho}$
-* Lion-beta2-meta : $\bar{c}$
-* meta-stepsize : $\eta$
-* alpha0 : $\alpha_0$
-* gamma : $\gamma$ 
-* seed: the seed number
-* run-name: the name of run
-* save-directory: the location of saving the outputs
-* max-time: maximum allowed time to run the algorithm
-
-In ImageNet dataset, we used the implementation of https://pytorch.org/examples/ to read the data. Please update the argument 'data' in this file to the path of your ImageNet dataset. For TinyStories, we used the implementation of code in https://github.com/karpathy/llama2.c to read the data and tokenize it. Please follow the instructions there to tokenize the data. Moreover, please set DATA_CACHE_DIR in tinystories.py to the path of tokenized data.
-
-# Requirements
-
-The required packages are:
-* numpy==1.23.5
-* pytest==7.4.0
-* Requests==2.31.0
-* sentencepiece==0.1.99
-* torch==2.0.1
-* torchvision==0.15.2
-* tqdm==4.64.1
-* wandb==0.15.5
-
-
-

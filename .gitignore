@@ -5,3 +5,15 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# macOS archive metadata
+.DS_Store
+__MACOSX/
+._*
+
+# Build C executables locally; do not version historical binaries.
+/codes/MetaOptimize/tinystories/run
+/codes/MetaOptimize/tinystories/runq
